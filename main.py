@@ -8,7 +8,7 @@ import pandas as pd
 
 app = FastAPI()
 
-# Caminho absoluto para evitar erros no Render
+# Caminho para os templates
 base_dir = os.path.dirname(os.path.realpath(__file__))
 templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
@@ -18,18 +18,27 @@ async def home(request: Request, ticker: str = "PETR4.SA", ano: int = 2024):
     preco_atual = "0.00"
     
     try:
-        # 1. Busca de dados
+        # O segredo está no 'group_by' e no 'squeeze' para garantir um DataFrame simples
         df = yf.download(ticker, start=f"{ano}-01-01", end=datetime.now().strftime("%Y-%m-%d"))
         
         if not df.empty:
-            ultimo_valor = df['Close'].iloc[-1]
+            # Se o yfinance trouxer colunas extras (Multi-Index), pegamos apenas a coluna 'Close'
+            if isinstance(df['Close'], pd.DataFrame):
+                serie_fechamento = df['Close'].iloc[:, 0]
+            else:
+                serie_fechamento = df['Close']
+
+            # Agora pegamos o último valor e garantimos que é um número (float)
+            ultimo_valor = serie_fechamento.iloc[-1]
             preco_atual = f"{float(ultimo_valor):.2f}"
             
+            # Prepara a tabela (últimos 10 dias)
             df_table = df.tail(10).copy()
             df_table.index = df_table.index.strftime("%d/%m/%Y")
+            
+            # Resetamos o índice para a data virar uma coluna comum
             registos = df_table.reset_index().to_dict(orient="records")
 
-        # 2. Renderização
         return templates.TemplateResponse("index.html", {
             "request": request,
             "ticker": ticker,
@@ -39,5 +48,4 @@ async def home(request: Request, ticker: str = "PETR4.SA", ano: int = 2024):
         })
 
     except Exception as e:
-        # Se der erro, ele mostra o texto do erro na página para você saber o que é
-        return HTMLResponse(content=f"<h1>Erro Interno Detalhado:</h1><p>{str(e)}</p>", status_code=500)
+        return HTMLResponse(content=f"<h1>Erro de Dados:</h1><p>{str(e)}</p>", status_code=500)
