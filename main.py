@@ -4,46 +4,39 @@ from fastapi.responses import HTMLResponse
 import yfinance as yf
 from datetime import datetime
 import pandas as pd
-import logging
-
-# Configuração de Logs para ajudar a debugar no Render
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI(title="InvestLens Pro")
+
+# Garante que o FastAPI encontre a pasta templates
 templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, ticker: str = "PETR4.SA", ano: int = 2024):
-    # Lógica de datas
-    start_date = f"{ano}-01-01"
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    
+    # Valores padrão para evitar erro 500 caso a busca falhe
     registos = []
     preco_atual = "0.00"
     
+    start_date = f"{ano}-01-01"
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    
     try:
-        logger.info(f"Buscando dados para: {ticker} no ano {ano}")
+        # Busca os dados
         df = yf.download(ticker, start=start_date, end=end_date)
         
         if not df.empty:
-            # Garante que os dados estão limpos
-            df = df.dropna()
+            # Pega o último preço válido
+            ultimo_valor = df['Close'].iloc[-1]
+            preco_atual = f"{float(ultimo_valor):.2f}"
             
-            # Formata o preço atual
-            ultimo_fechamento = float(df['Close'].iloc[-1])
-            preco_atual = f"{ultimo_fechamento:.2f}"
-            
-            # Prepara os últimos 10 registros para a tabela
-            df_recent = df.tail(10).copy()
-            df_recent.index = df_recent.index.strftime("%d/%m/%Y")
-            registos = df_recent.reset_index().to_dict(orient="records")
-        else:
-            logger.warning(f"Nenhum dado encontrado para o ticker {ticker}")
+            # Prepara a tabela (últimos 10 dias)
+            df_table = df.tail(10).copy()
+            df_table.index = df_table.index.strftime("%d/%m/%Y")
+            # Convertemos para lista de dicionários
+            registos = df_table.reset_index().to_dict(orient="records")
             
     except Exception as e:
-        logger.error(f"Erro ao processar requisição: {e}")
-        # O app continua rodando, mas envia listas vazias para o HTML não quebrar
+        print(f"Erro ao buscar dados: {e}")
+        # Aqui o código não trava, ele apenas envia os valores padrão
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -52,8 +45,3 @@ async def home(request: Request, ticker: str = "PETR4.SA", ano: int = 2024):
         "registos": registos,
         "preco_atual": preco_atual
     })
-
-# Rota de verificação de integridade (Health Check)
-@app.get("/health")
-async def health():
-    return {"status": "online"}
