@@ -8,50 +8,48 @@ import pandas as pd
 
 app = FastAPI()
 
+# Configuração de templates
 base_dir = os.path.dirname(os.path.realpath(__file__))
 templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, ticker: str = "PETR4.SA", ano: int = 2024):
     registos = []
-    preco_atual = "N/A"
-    mensagem_erro = None
+    preco_atual = "0.00"
     
     try:
-        # 1. Tentativa de download com parâmetros para evitar bloqueios
+        # 1. Download dos dados
         df = yf.download(ticker, start=f"{ano}-01-01", end=datetime.now().strftime("%Y-%m-%d"), progress=False)
         
         if df is not None and not df.empty:
-            # Limpeza das colunas (evita o erro da tupla)
+            # 2. RESOLUÇÃO DO ERRO DE TUPLA:
+            # Se as colunas forem Multi-Index, pegamos apenas o primeiro nível (ex: 'Close')
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             
-            # Pega o último preço
+            # 3. EXTRAÇÃO SEGURA:
+            # Pegamos o último preço da coluna Close e forçamos ser um número simples
             ultimo_valor = df['Close'].iloc[-1]
             preco_atual = f"{float(ultimo_valor):.2f}"
             
-            # Prepara a tabela
-            df_table = df.tail(10).copy()
-            df_table.index = df_table.index.strftime("%d/%m/%Y")
-            
-            for date, row in df_table.iterrows():
+            # 4. CONSTRUÇÃO MANUAL DO DICIONÁRIO:
+            # Não usamos to_dict() direto para evitar que metadados do Pandas virem chaves de tupla
+            df_recent = df.tail(10).copy()
+            for index, row in df_recent.iterrows():
                 registos.append({
-                    "Date": str(date),
-                    "Close": float(row["Close"]),
+                    "Date": index.strftime("%d/%m/%Y"),
+                    "Close": round(float(row["Close"]), 2),
                     "Volume": int(row["Volume"])
                 })
-        else:
-            mensagem_erro = "O Yahoo Finance não retornou dados (possível bloqueio de IP)."
-
+        
     except Exception as e:
-        # Se der erro de Rate Limit, o site não cai, ele apenas avisa
-        mensagem_erro = f"Erro temporário: {str(e)}"
+        print(f"Erro detectado: {e}")
+        # O preco_atual continuará "0.00" e registos será [], evitando o erro 500
 
     return templates.TemplateResponse("index.html", {
         "request": request,
         "ticker": ticker,
         "ano": ano,
         "registos": registos,
-        "preco_atual": preco_atual,
-        "erro": mensagem_erro # Adicione um alerta no seu HTML para isso
+        "preco_atual": preco_atual
     })
